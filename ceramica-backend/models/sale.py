@@ -25,7 +25,7 @@ class PaymentMethod(str, enum.Enum):
     cash = "cash"
     card = "card"
     transfer = "transfer"
-    credit = "credit"   # store credit / deferred
+    credit = "credit"
 
 
 class Sale(FullMixin, Base):
@@ -43,7 +43,6 @@ class Sale(FullMixin, Base):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Financials (cents)
     subtotal_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     discount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -80,10 +79,11 @@ class SaleItem(UUIDMixin, TimestampMixin, Base):
     product_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("products.id", ondelete="RESTRICT"), nullable=False
     )
-    store_id: Mapped[str] = mapped_column(String(36), nullable=False)  # denormalized for queries
+    store_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     discount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_cents: Mapped[int] = mapped_column(Integer, nullable=False)
 

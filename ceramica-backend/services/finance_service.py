@@ -7,7 +7,8 @@ from config import get_settings
 from models.client import Client
 from models.finance import Expense
 from models.product import Product
-from models.sale import Payment, Sale, SaleStatus
+from models.sale import Payment, Sale, SaleItem, SaleStatus
+from models.supplier import PurchaseOrder
 from models.user import User
 from schemas.finance import ExpenseCreate
 
@@ -26,13 +27,11 @@ class FinanceService:
 
         since = now - timedelta(days=period_days)
 
-        # Revenue: sum of payments in period
         revenue_q = select(func.coalesce(func.sum(Payment.amount_cents), 0)).where(
             Payment.store_id == self.store_id, Payment.created_at >= since
         )
         revenue = (await self.db.execute(revenue_q)).scalar_one()
 
-        # Expenses in period
         expenses_q = select(func.coalesce(func.sum(Expense.amount_cents), 0)).where(
             Expense.store_id == self.store_id,
             Expense.is_active.is_(True),
@@ -40,7 +39,6 @@ class FinanceService:
         )
         expenses = (await self.db.execute(expenses_q)).scalar_one()
 
-        # Sales count
         sales_q = select(func.count()).where(
             Sale.store_id == self.store_id,
             Sale.is_active.is_(True),
@@ -48,19 +46,26 @@ class FinanceService:
         )
         sales_count = (await self.db.execute(sales_q)).scalar_one()
 
-        # Pending debt
         debt_q = select(func.coalesce(func.sum(Client.debt_cents), 0)).where(
             Client.store_id == self.store_id, Client.is_active.is_(True)
         )
         pending_debt = (await self.db.execute(debt_q)).scalar_one()
 
-        # Low stock count
         low_stock_q = select(func.count()).where(
             Product.store_id == self.store_id,
             Product.is_active.is_(True),
             Product.stock_quantity <= Product.low_stock_threshold,
         )
         low_stock_count = (await self.db.execute(low_stock_q)).scalar_one()
+
+        # Accounts payable: sum of unpaid PO balances
+        ap_q = select(
+            func.coalesce(func.sum(PurchaseOrder.total_cents - PurchaseOrder.paid_cents), 0)
+        ).where(
+            PurchaseOrder.store_id == self.store_id,
+            PurchaseOrder.is_active.is_(True),
+        )
+        accounts_payable = (await self.db.execute(ap_q)).scalar_one()
 
         return {
             "period_label": f"Last {period_days} days",
@@ -70,11 +75,12 @@ class FinanceService:
             "sales_count": sales_count,
             "pending_debt_cents": pending_debt,
             "low_stock_count": low_stock_count,
-            "top_products": [],  # Extended via background task
+            "accounts_receivable_cents": pending_debt,
+            "accounts_payable_cents": accounts_payable,
+            "top_products": [],
         }
 
     async def create_expense(self, data: ExpenseCreate) -> Expense:
-        # Idempotency
         if data.client_generated_id:
             result = await self.db.execute(
                 select(Expense).where(
@@ -117,6 +123,55 @@ class FinanceService:
             "expenses_cents": expenses,
             "net_cents": revenue - expenses,
             "by_day": [],
+        }
+
+    async def get_profit_loss(self, from_date: datetime, to_date: datetime) -> dict:
+        # Revenue: sum of sale items sold in period
+        revenue_q = select(
+            func.coalesce(func.sum(SaleItem.total_cents), 0)
+        ).join(Sale, SaleItem.sale_id == Sale.id).where(
+            Sale.store_id == self.store_id,
+            Sale.is_active.is_(True),
+            Sale.created_at >= from_date,
+            Sale.created_at <= to_date,
+            Sale.status.in_([SaleStatus.completed, SaleStatus.partial]),
+        )
+        revenue = (await self.db.execute(revenue_q)).scalar_one()
+
+        # COGS: unit_cost_cents * quantity per item
+        cogs_q = select(
+            func.coalesce(
+                func.sum(SaleItem.unit_cost_cents * SaleItem.quantity), 0
+            )
+        ).join(Sale, SaleItem.sale_id == Sale.id).where(
+            Sale.store_id == self.store_id,
+            Sale.is_active.is_(True),
+            Sale.created_at >= from_date,
+            Sale.created_at <= to_date,
+            Sale.status.in_([SaleStatus.completed, SaleStatus.partial]),
+            SaleItem.unit_cost_cents.isnot(None),
+        )
+        cogs = (await self.db.execute(cogs_q)).scalar_one()
+
+        expenses_q = select(func.coalesce(func.sum(Expense.amount_cents), 0)).where(
+            Expense.store_id == self.store_id,
+            Expense.is_active.is_(True),
+            Expense.created_at >= from_date,
+            Expense.created_at <= to_date,
+        )
+        expenses = (await self.db.execute(expenses_q)).scalar_one()
+
+        gross_profit = revenue - cogs
+        net_profit = gross_profit - expenses
+
+        return {
+            "from_date": from_date,
+            "to_date": to_date,
+            "revenue_cents": revenue,
+            "cogs_cents": cogs,
+            "gross_profit_cents": gross_profit,
+            "expenses_cents": expenses,
+            "net_profit_cents": net_profit,
         }
 
     async def list_expenses(

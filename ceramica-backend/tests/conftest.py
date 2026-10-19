@@ -1,5 +1,6 @@
 """Shared fixtures for the test suite."""
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -7,6 +8,15 @@ from sqlalchemy.pool import StaticPool
 
 from database import Base, get_db
 from main import app
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Clear rate-limiter state between tests to avoid 429s."""
+    import dependencies.rate_limit as rl
+    rl._buckets.clear()
+    yield
+    rl._buckets.clear()
 
 
 @pytest_asyncio.fixture

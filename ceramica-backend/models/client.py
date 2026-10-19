@@ -1,6 +1,7 @@
+import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Enum, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -9,6 +10,12 @@ from models.base_mixin import FullMixin
 if TYPE_CHECKING:
     from models.store import Store
     from models.sale import Sale
+
+
+class ClientType(str, enum.Enum):
+    retail = "retail"
+    distributor = "distributor"
+    contractor = "contractor"
 
 
 class Client(FullMixin, Base):
@@ -20,8 +27,11 @@ class Client(FullMixin, Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Total outstanding debt in cents; updated as payments come in
     debt_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    client_type: Mapped[ClientType] = mapped_column(
+        Enum(ClientType, name="client_type"), default=ClientType.retail, nullable=False
+    )
+    credit_limit_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     client_generated_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True, index=True

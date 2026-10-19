@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models.product import Product
-from models.supplier import PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, Supplier
+from models.stock_movement import MovementReason, StockMovement
+from models.supplier import (
+    PurchaseOrder,
+    PurchaseOrderItem,
+    PurchaseOrderPayment,
+    PurchaseOrderStatus,
+    Supplier,
+)
 from models.user import User
 from schemas.supplier import PurchaseOrderCreate, PurchaseOrderReceive, SupplierCreate
 
@@ -34,7 +41,6 @@ class SupplierService:
         return supplier
 
     async def create_purchase_order(self, data: PurchaseOrderCreate) -> PurchaseOrder:
-        # Idempotency
         if data.client_generated_id:
             result = await self.db.execute(
                 select(PurchaseOrder).where(
@@ -88,7 +94,12 @@ class SupplierService:
             )
         order.total_cents = total
         await self.db.flush()
-        return order
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .where(PurchaseOrder.id == order.id)
+            .options(selectinload(PurchaseOrder.items))
+        )
+        return result.scalar_one()
 
     async def receive_order(
         self, order_id: str, data: PurchaseOrderReceive, broadcast: BroadcastFn | None = None
@@ -118,7 +129,6 @@ class SupplierService:
                 continue
             item.quantity_received += qty
 
-            # Increment stock with optimistic locking
             result = await self.db.execute(
                 select(Product).where(Product.id == item.product_id)
             )
@@ -131,6 +141,14 @@ class SupplierService:
                     version=Product.version + 1,
                 )
             )
+            self.db.add(StockMovement(
+                store_id=self.store_id,
+                product_id=product.id,
+                quantity_change=qty,
+                reason=MovementReason.purchase,
+                reference_id=order.id,
+                user_id=self.user.id if self.user else None,
+            ))
             received_products.append(
                 {"product_id": product.id, "sku": product.sku, "quantity": qty}
             )
@@ -150,6 +168,38 @@ class SupplierService:
             )
 
         return order
+
+    async def add_payment(self, order_id: str, amount_cents: int, notes: str | None) -> PurchaseOrder:
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .where(PurchaseOrder.id == order_id, PurchaseOrder.store_id == self.store_id)
+            .options(selectinload(PurchaseOrder.items))
+        )
+        order = result.scalar_one_or_none()
+        if not order:
+            raise HTTPException(status_code=404, detail="Purchase order not found")
+
+        balance = order.total_cents - order.paid_cents
+        if amount_cents > balance:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment ({amount_cents}) exceeds PO balance ({balance})",
+            )
+
+        self.db.add(PurchaseOrderPayment(
+            order_id=order.id,
+            store_id=self.store_id,
+            amount_cents=amount_cents,
+            notes=notes,
+        ))
+        order.paid_cents += amount_cents
+        await self.db.flush()
+        result = await self.db.execute(
+            select(PurchaseOrder)
+            .where(PurchaseOrder.id == order.id)
+            .options(selectinload(PurchaseOrder.items))
+        )
+        return result.scalar_one()
 
     async def list_purchase_orders(
         self, limit: int = 20, offset: int = 0

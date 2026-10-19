@@ -18,18 +18,15 @@ class Product(FullMixin, Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
-    # All monetary values in cents (integer) to avoid float precision issues
     price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     cost_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    wholesale_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Inventory
     stock_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
 
-    # Optimistic locking — incremented on every stock write
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
-    # Client-generated idempotency key (for offline-first support)
     client_generated_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True, index=True
     )
@@ -40,6 +37,9 @@ class Product(FullMixin, Base):
     )
     purchase_order_items: Mapped[list["PurchaseOrderItem"]] = relationship(  # noqa: F821
         "PurchaseOrderItem", back_populates="product"
+    )
+    stock_movements: Mapped[list["StockMovement"]] = relationship(  # noqa: F821
+        "StockMovement", back_populates="product"
     )
 
     def __repr__(self) -> str:

@@ -2,13 +2,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_current_user, require_roles
 from dependencies.store import get_store_id
-from models.user import User
+from models.user import User, UserRole
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
 from schemas.supplier import (
     PurchaseOrderCreate,
     PurchaseOrderOut,
+    PurchaseOrderPaymentCreate,
     PurchaseOrderReceive,
     SupplierCreate,
     SupplierOut,
@@ -17,6 +18,8 @@ from services.supplier_service import SupplierService
 from websocket_manager import manager
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
+
+_privileged = Depends(require_roles(UserRole.owner, UserRole.admin))
 
 
 def _svc(
@@ -40,13 +43,18 @@ async def list_suppliers(
     )
 
 
-@router.post("", response_model=StandardResponse[SupplierOut], status_code=201)
+@router.post("", response_model=StandardResponse[SupplierOut], status_code=201, dependencies=[_privileged])
 async def create_supplier(data: SupplierCreate, svc: SupplierService = Depends(_svc)):
     supplier = await svc.create_supplier(data)
     return StandardResponse(data=SupplierOut.model_validate(supplier))
 
 
-@router.post("/purchase-orders", response_model=StandardResponse[PurchaseOrderOut], status_code=201)
+@router.post(
+    "/purchase-orders",
+    response_model=StandardResponse[PurchaseOrderOut],
+    status_code=201,
+    dependencies=[_privileged],
+)
 async def create_purchase_order(data: PurchaseOrderCreate, svc: SupplierService = Depends(_svc)):
     order = await svc.create_purchase_order(data)
     return StandardResponse(data=PurchaseOrderOut.model_validate(order))
@@ -66,7 +74,9 @@ async def list_purchase_orders(
 
 
 @router.patch(
-    "/purchase-orders/{order_id}/receive", response_model=StandardResponse[PurchaseOrderOut]
+    "/purchase-orders/{order_id}/receive",
+    response_model=StandardResponse[PurchaseOrderOut],
+    dependencies=[_privileged],
 )
 async def receive_order(
     order_id: str,
@@ -82,4 +92,18 @@ async def receive_order(
     order = await svc.receive_order(order_id, data, broadcast=collect)
     for args in pending:
         background_tasks.add_task(manager.broadcast, *args)
+    return StandardResponse(data=PurchaseOrderOut.model_validate(order))
+
+
+@router.post(
+    "/purchase-orders/{order_id}/payment",
+    response_model=StandardResponse[PurchaseOrderOut],
+    dependencies=[_privileged],
+)
+async def pay_purchase_order(
+    order_id: str,
+    data: PurchaseOrderPaymentCreate,
+    svc: SupplierService = Depends(_svc),
+):
+    order = await svc.add_payment(order_id, data.amount_cents, data.notes)
     return StandardResponse(data=PurchaseOrderOut.model_validate(order))

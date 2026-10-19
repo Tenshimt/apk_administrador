@@ -48,9 +48,12 @@ class PurchaseOrderCreate(BaseModel):
 
 
 class PurchaseOrderReceive(BaseModel):
-    """Partial or full receipt of a purchase order."""
+    items: list[dict]
+    notes: str | None = None
 
-    items: list[dict]  # [{item_id, quantity_received}]
+
+class PurchaseOrderPaymentCreate(BaseModel):
+    amount_cents: int = Field(..., gt=0)
     notes: str | None = None
 
 
@@ -60,6 +63,7 @@ class PurchaseOrderOut(BaseModel):
     supplier_id: str
     status: PurchaseOrderStatus
     total_cents: int
+    paid_cents: int = 0
     notes: str | None
     items: list[PurchaseOrderItemOut] = []
 

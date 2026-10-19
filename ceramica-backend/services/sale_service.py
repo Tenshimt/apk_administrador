@@ -9,9 +9,10 @@ from sqlalchemy.orm import selectinload
 
 from config import get_settings
 from models.audit import AuditLog
-from models.client import Client
+from models.client import Client, ClientType
 from models.product import Product
 from models.sale import Payment, Sale, SaleItem, SaleStatus
+from models.stock_movement import MovementReason, StockMovement
 from models.user import User, UserRole
 from schemas.sale import PaymentCreate, SaleCreate, SaleStatusUpdate
 
@@ -89,6 +90,9 @@ class SaleService:
             if not client:
                 raise HTTPException(status_code=404, detail="Client not found")
 
+        is_distributor = client and client.client_type == ClientType.distributor
+        is_privileged = self.user and self.user.role in _PRIVILEGED
+
         sale_items = []
         subtotal = 0
 
@@ -112,8 +116,10 @@ class SaleService:
                     f"available={product.stock_quantity}, requested={item_data.quantity}",
                 )
 
-            # Price comes from product; override allowed only for owner/admin
-            if item_data.unit_price_cents is not None and item_data.unit_price_cents != product.price_cents:
+            # Determine effective price
+            if is_distributor and product.wholesale_price_cents and not item_data.unit_price_cents:
+                unit_price = product.wholesale_price_cents
+            elif item_data.unit_price_cents is not None and item_data.unit_price_cents != product.price_cents:
                 self._require_privileged()
                 unit_price = item_data.unit_price_cents
             else:
@@ -151,6 +157,7 @@ class SaleService:
                     store_id=self.store_id,
                     quantity=item_data.quantity,
                     unit_price_cents=unit_price,
+                    unit_cost_cents=product.cost_cents,
                     discount_cents=item_data.discount_cents,
                     total_cents=item_total,
                 )
@@ -190,6 +197,15 @@ class SaleService:
         for item in sale_items:
             item.sale_id = sale.id
             self.db.add(item)
+            # Stock movement ledger
+            self.db.add(StockMovement(
+                store_id=self.store_id,
+                product_id=item.product_id,
+                quantity_change=-item.quantity,
+                reason=MovementReason.sale,
+                reference_id=sale.id,
+                user_id=self.user.id if self.user else None,
+            ))
 
         # Optional immediate payment
         if data.payment_method and data.payment_amount_cents:
@@ -208,6 +224,13 @@ class SaleService:
                 raise HTTPException(
                     status_code=400,
                     detail="client_id is required when sale has an unpaid balance",
+                )
+            # Check credit limit
+            if client.credit_limit_cents > 0 and client.debt_cents + remaining > client.credit_limit_cents:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Credit limit exceeded. Limit: {client.credit_limit_cents}, "
+                    f"current debt: {client.debt_cents}, new balance: {remaining}",
                 )
             client.debt_cents += remaining
 
@@ -257,6 +280,14 @@ class SaleService:
                 .where(Product.id == item.product_id)
                 .values(stock_quantity=Product.stock_quantity + item.quantity)
             )
+            self.db.add(StockMovement(
+                store_id=self.store_id,
+                product_id=item.product_id,
+                quantity_change=item.quantity,
+                reason=MovementReason.cancel,
+                reference_id=sale.id,
+                user_id=self.user.id if self.user else None,
+            ))
 
         # Reverse client debt (only the unpaid balance)
         if sale.client_id and sale.balance_cents > 0:
@@ -295,6 +326,11 @@ class SaleService:
         return result.scalar_one()
 
     async def update_status(self, sale_id: str, data: SaleStatusUpdate) -> Sale:
+        if data.status == SaleStatus.cancelled:
+            raise HTTPException(
+                status_code=400,
+                detail="Use POST /sales/{id}/cancel to cancel a sale",
+            )
         sale = await self.get_or_404(sale_id)
         sale.status = data.status
         await self.db.flush()

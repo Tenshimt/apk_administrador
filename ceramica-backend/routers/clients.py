@@ -2,15 +2,17 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_current_user, require_roles
 from dependencies.store import get_store_id
-from models.user import User
-from schemas.client import ClientCreate, ClientDebtOut, ClientOut, ClientUpdate
+from models.user import User, UserRole
+from schemas.client import ClientCreate, ClientDebtOut, ClientOut, ClientUpdate, DebtAgingEntry
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
 from schemas.sale import PaymentCreate, SaleOut
 from services.client_service import ClientService
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+_privileged = Depends(require_roles(UserRole.owner, UserRole.admin))
 
 
 def _svc(
@@ -39,6 +41,12 @@ async def list_clients(
 async def create_client(data: ClientCreate, svc: ClientService = Depends(_svc)):
     client = await svc.create(data)
     return StandardResponse(data=ClientOut.model_validate(client))
+
+
+@router.get("/debt-aging", response_model=StandardResponse[list[DebtAgingEntry]], dependencies=[_privileged])
+async def debt_aging(svc: ClientService = Depends(_svc)):
+    entries = await svc.get_debt_aging()
+    return StandardResponse(data=[DebtAgingEntry(**e) for e in entries])
 
 
 @router.get("/{client_id}", response_model=StandardResponse[ClientOut])

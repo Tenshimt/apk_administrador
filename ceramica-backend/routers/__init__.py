@@ -4,6 +4,7 @@ from routers.finance import router as finance_router
 from routers.products import router as products_router
 from routers.sales import router as sales_router
 from routers.suppliers import router as suppliers_router
+from routers.users import router as users_router
 from routers.websocket import router as ws_router
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "products_router",
     "sales_router",
     "suppliers_router",
+    "users_router",
     "ws_router",
 ]

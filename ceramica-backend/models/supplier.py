@@ -55,6 +55,7 @@ class PurchaseOrder(FullMixin, Base):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    paid_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     client_generated_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True, index=True
@@ -64,6 +65,13 @@ class PurchaseOrder(FullMixin, Base):
     items: Mapped[list["PurchaseOrderItem"]] = relationship(
         "PurchaseOrderItem", back_populates="order", cascade="all, delete-orphan"
     )
+    po_payments: Mapped[list["PurchaseOrderPayment"]] = relationship(
+        "PurchaseOrderPayment", back_populates="order", cascade="all, delete-orphan"
+    )
+
+    @property
+    def balance_cents(self) -> int:
+        return self.total_cents - self.paid_cents
 
     def __repr__(self) -> str:
         return f"<PurchaseOrder {self.id[:8]} status={self.status}>"
@@ -87,3 +95,16 @@ class PurchaseOrderItem(UUIDMixin, TimestampMixin, Base):
 
     order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", back_populates="items")
     product: Mapped["Product"] = relationship("Product", back_populates="purchase_order_items")
+
+
+class PurchaseOrderPayment(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "purchase_order_payments"
+
+    order_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    store_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    order: Mapped["PurchaseOrder"] = relationship("PurchaseOrder", back_populates="po_payments")

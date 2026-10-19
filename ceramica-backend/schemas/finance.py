@@ -32,6 +32,8 @@ class DashboardOut(BaseModel):
     sales_count: int
     pending_debt_cents: int
     low_stock_count: int
+    accounts_receivable_cents: int = 0
+    accounts_payable_cents: int = 0
     top_products: list[dict] = []
 
 
@@ -42,3 +44,13 @@ class CashflowOut(BaseModel):
     expenses_cents: int
     net_cents: int
     by_day: list[dict] = []
+
+
+class ProfitLossOut(BaseModel):
+    from_date: datetime
+    to_date: datetime
+    revenue_cents: int
+    cogs_cents: int
+    gross_profit_cents: int
+    expenses_cents: int
+    net_profit_cents: int

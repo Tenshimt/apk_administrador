@@ -14,6 +14,7 @@ class SaleItemOut(BaseModel):
     product_id: str
     quantity: int
     unit_price_cents: int
+    unit_cost_cents: int | None = None
     discount_cents: int
     total_cents: int
 

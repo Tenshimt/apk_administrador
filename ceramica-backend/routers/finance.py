@@ -4,14 +4,16 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_current_user, require_roles
 from dependencies.store import get_store_id
-from models.user import User
+from models.user import User, UserRole
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
-from schemas.finance import CashflowOut, DashboardOut, ExpenseCreate, ExpenseOut
+from schemas.finance import CashflowOut, DashboardOut, ExpenseCreate, ExpenseOut, ProfitLossOut
 from services.finance_service import FinanceService
 
 router = APIRouter(prefix="/finance", tags=["finance"])
+
+_privileged = Depends(require_roles(UserRole.owner, UserRole.admin))
 
 
 def _svc(
@@ -45,6 +47,16 @@ async def cashflow(
 ):
     data = await svc.get_cashflow(from_date, to_date)
     return StandardResponse(data=CashflowOut(**data))
+
+
+@router.get("/reports/profit-loss", response_model=StandardResponse[ProfitLossOut], dependencies=[_privileged])
+async def profit_loss(
+    from_date: datetime = Query(default_factory=lambda: datetime.now(timezone.utc) - timedelta(days=30)),
+    to_date: datetime = Query(default_factory=lambda: datetime.now(timezone.utc)),
+    svc: FinanceService = Depends(_svc),
+):
+    data = await svc.get_profit_loss(from_date, to_date)
+    return StandardResponse(data=ProfitLossOut(**data))
 
 
 @router.get("/reports/sales", response_model=StandardResponse[dict])

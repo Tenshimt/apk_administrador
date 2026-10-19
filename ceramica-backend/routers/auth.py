@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies.auth import get_current_user
+from dependencies.rate_limit import auth_rate_limit
 from models.user import User
 from schemas.auth import LoginRequest, LoginResponse, RefreshRequest, RegisterStoreRequest
 from schemas.common import StandardResponse
@@ -11,14 +12,23 @@ from services.auth_service import AuthService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/register-store", response_model=StandardResponse[dict], status_code=201)
+@router.post(
+    "/register-store",
+    response_model=StandardResponse[dict],
+    status_code=201,
+    dependencies=[Depends(auth_rate_limit)],
+)
 async def register_store(data: RegisterStoreRequest, db: AsyncSession = Depends(get_db)):
     svc = AuthService(db)
     result = await svc.register_store(data)
     return StandardResponse(data=result)
 
 
-@router.post("/login", response_model=StandardResponse[LoginResponse])
+@router.post(
+    "/login",
+    response_model=StandardResponse[LoginResponse],
+    dependencies=[Depends(auth_rate_limit)],
+)
 async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     svc = AuthService(db)
     tokens = await svc.login(data)
