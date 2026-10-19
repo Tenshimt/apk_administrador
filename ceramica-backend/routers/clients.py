@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies.auth import get_current_user
 from dependencies.store import get_store_id
-from models.sale import Sale
+from models.sale import Sale, SaleStatus
 from models.user import User
 from schemas.client import ClientCreate, ClientDebtOut, ClientOut, ClientUpdate
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
-from schemas.sale import PaymentCreate, PaymentOut, SaleOut
+from schemas.sale import PaymentCreate, SaleOut
 from services.client_service import ClientService
 from services.sale_service import SaleService
 from websocket_manager import manager
@@ -68,15 +69,13 @@ async def get_client_debt(client_id: str, svc: ClientService = Depends(_svc)):
 async def client_payment(
     client_id: str,
     data: PaymentCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     store_id: str = Depends(get_store_id),
     user: User = Depends(get_current_user),
     client_svc: ClientService = Depends(_svc),
 ):
     """Apply a payment to a client's oldest unpaid sale."""
-    from sqlalchemy import select
-    from models.sale import Sale, SaleStatus
-
     client = await client_svc.get_or_404(client_id)
     result = await db.execute(
         select(Sale)
@@ -90,11 +89,17 @@ async def client_payment(
     )
     sale = result.scalar_one_or_none()
     if not sale:
-        from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Client has no outstanding sales")
 
+    pending: list[tuple] = []
+
+    async def collect(s_id: str, event_type: str, payload: dict) -> None:
+        pending.append((s_id, event_type, payload))
+
     sale_svc = SaleService(db, store_id, user)
-    await sale_svc.add_payment(sale.id, data, broadcast=manager.broadcast)
+    await sale_svc.add_payment(sale.id, data, broadcast=collect)
+    for args in pending:
+        background_tasks.add_task(manager.broadcast, *args)
     return StandardResponse(data={"message": "Payment applied", "sale_id": sale.id})
 
 

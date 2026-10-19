@@ -127,7 +127,13 @@ class AuthService:
             )
         )
         record = result.scalar_one_or_none()
-        if not record or record.expires_at < datetime.now(timezone.utc):
+        if not record:
+            raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+        # SQLite stores datetimes without timezone; normalize before comparison
+        expires_at = record.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
 
         # Rotate token

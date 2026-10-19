@@ -61,10 +61,12 @@ class SaleService:
         # Idempotency check
         if data.client_generated_id:
             result = await self.db.execute(
-                select(Sale).where(
+                select(Sale)
+                .where(
                     Sale.client_generated_id == data.client_generated_id,
                     Sale.store_id == self.store_id,
                 )
+                .options(selectinload(Sale.items), selectinload(Sale.payments))
             )
             existing = result.scalar_one_or_none()
             if existing:
@@ -201,7 +203,13 @@ class SaleService:
                 {"sale_id": sale.id, "total_cents": total, "status": sale.status.value},
             )
 
-        return sale
+        # Reload with eager-loaded relationships to avoid MissingGreenlet on serialization
+        result = await self.db.execute(
+            select(Sale)
+            .where(Sale.id == sale.id)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
+        )
+        return result.scalar_one()
 
     async def update_status(self, sale_id: str, data: SaleStatusUpdate) -> Sale:
         sale = await self.get_or_404(sale_id)
@@ -243,7 +251,13 @@ class SaleService:
                 },
             )
 
-        return sale
+        # Reload with eager-loaded relationships to avoid MissingGreenlet on serialization
+        result = await self.db.execute(
+            select(Sale)
+            .where(Sale.id == sale.id)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
+        )
+        return result.scalar_one()
 
     async def _apply_payment(
         self, sale: Sale, client: Client | None, data: PaymentCreate

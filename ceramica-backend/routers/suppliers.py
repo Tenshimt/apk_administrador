@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -71,7 +71,15 @@ async def list_purchase_orders(
 async def receive_order(
     order_id: str,
     data: PurchaseOrderReceive,
+    background_tasks: BackgroundTasks,
     svc: SupplierService = Depends(_svc),
 ):
-    order = await svc.receive_order(order_id, data, broadcast=manager.broadcast)
+    pending: list[tuple] = []
+
+    async def collect(store_id: str, event_type: str, payload: dict) -> None:
+        pending.append((store_id, event_type, payload))
+
+    order = await svc.receive_order(order_id, data, broadcast=collect)
+    for args in pending:
+        background_tasks.add_task(manager.broadcast, *args)
     return StandardResponse(data=PurchaseOrderOut.model_validate(order))

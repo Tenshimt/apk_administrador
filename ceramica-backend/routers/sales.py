@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -6,7 +6,7 @@ from dependencies.auth import get_current_user
 from dependencies.store import get_store_id
 from models.user import User
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
-from schemas.sale import PaymentCreate, PaymentOut, SaleCreate, SaleOut, SaleStatusUpdate
+from schemas.sale import PaymentCreate, SaleCreate, SaleOut, SaleStatusUpdate
 from services.sale_service import SaleService
 from websocket_manager import manager
 
@@ -19,6 +19,20 @@ def _svc(
     user: User = Depends(get_current_user),
 ) -> SaleService:
     return SaleService(db, store_id, user)
+
+
+def _deferred_broadcast(background_tasks: BackgroundTasks):
+    """Returns a collector that schedules broadcasts after the DB commit."""
+    pending: list[tuple] = []
+
+    async def collect(store_id: str, event_type: str, payload: dict) -> None:
+        pending.append((store_id, event_type, payload))
+
+    def schedule() -> None:
+        for args in pending:
+            background_tasks.add_task(manager.broadcast, *args)
+
+    return collect, schedule
 
 
 @router.get("", response_model=PaginatedResponse[SaleOut])
@@ -35,8 +49,14 @@ async def list_sales(
 
 
 @router.post("", response_model=StandardResponse[SaleOut], status_code=201)
-async def create_sale(data: SaleCreate, svc: SaleService = Depends(_svc)):
-    sale = await svc.create(data, broadcast=manager.broadcast)
+async def create_sale(
+    data: SaleCreate,
+    background_tasks: BackgroundTasks,
+    svc: SaleService = Depends(_svc),
+):
+    collect, schedule = _deferred_broadcast(background_tasks)
+    sale = await svc.create(data, broadcast=collect)
+    schedule()
     return StandardResponse(data=SaleOut.model_validate(sale))
 
 
@@ -56,7 +76,12 @@ async def update_status(
 
 @router.post("/{sale_id}/payment", response_model=StandardResponse[SaleOut])
 async def add_payment(
-    sale_id: str, data: PaymentCreate, svc: SaleService = Depends(_svc)
+    sale_id: str,
+    data: PaymentCreate,
+    background_tasks: BackgroundTasks,
+    svc: SaleService = Depends(_svc),
 ):
-    sale = await svc.add_payment(sale_id, data, broadcast=manager.broadcast)
+    collect, schedule = _deferred_broadcast(background_tasks)
+    sale = await svc.add_payment(sale_id, data, broadcast=collect)
+    schedule()
     return StandardResponse(data=SaleOut.model_validate(sale))

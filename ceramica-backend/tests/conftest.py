@@ -1,54 +1,42 @@
 """Shared fixtures for the test suite."""
 
-import asyncio
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from database import Base, get_db
 from main import app
 
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
-_engine = create_async_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
-_SessionLocal = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_db():
-    async with _engine.begin() as conn:
+@pytest_asyncio.fixture
+async def db_engine():
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with _engine.begin() as conn:
+    yield engine
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def db_session():
-    async with _SessionLocal() as session:
-        yield session
+async def client(db_engine):
+    session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
+    async def _override_db():
+        async with session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
-async def _override_db():
-    async with _SessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-
-
-@pytest_asyncio.fixture
-async def client(db_session):
     app.dependency_overrides[get_db] = _override_db
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

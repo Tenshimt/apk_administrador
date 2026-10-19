@@ -105,6 +105,7 @@ class ClientService:
         q = (
             select(Sale)
             .where(Sale.client_id == client_id, Sale.store_id == self.store_id)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
             .order_by(Sale.created_at.desc())
         )
         count_q = select(func.count()).select_from(q.subquery())

@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies.auth import get_current_user
 from dependencies.store import get_store_id
-from models.user import User, UserRole
+from models.user import User
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
 from schemas.product import ProductCreate, ProductOut, ProductUpdate, StockAdjustRequest
 from services.product_service import ProductService
@@ -81,7 +81,15 @@ async def delete_product(product_id: str, svc: ProductService = Depends(_svc)):
 async def adjust_stock(
     product_id: str,
     data: StockAdjustRequest,
+    background_tasks: BackgroundTasks,
     svc: ProductService = Depends(_svc),
 ):
-    product = await svc.adjust_stock(product_id, data, broadcast_fn=manager.broadcast)
+    pending: list[tuple] = []
+
+    async def collect(store_id: str, event_type: str, payload: dict) -> None:
+        pending.append((store_id, event_type, payload))
+
+    product = await svc.adjust_stock(product_id, data, broadcast_fn=collect)
+    for args in pending:
+        background_tasks.add_task(manager.broadcast, *args)
     return StandardResponse(data=ProductOut.model_validate(product))

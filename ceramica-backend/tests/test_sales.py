@@ -87,6 +87,24 @@ async def test_overpayment_rejected(client, auth_headers):
 
 
 @pytest.mark.asyncio
+async def test_sale_response_includes_items_and_payments(client, auth_headers):
+    """POST /sales response must serialize items and payments (no MissingGreenlet)."""
+    product = await _create_product(client, auth_headers, "RESP-001", stock=10)
+    resp = await client.post("/sales", json={
+        "items": [{"product_id": product["id"], "quantity": 2, "unit_price_cents": 5000, "discount_cents": 0}],
+        "discount_cents": 0,
+        "payment_method": "cash",
+        "payment_amount_cents": 10000,
+    }, headers=auth_headers)
+    assert resp.status_code == 201
+    sale = resp.json()["data"]
+    assert isinstance(sale["items"], list)
+    assert len(sale["items"]) == 1
+    assert isinstance(sale["payments"], list)
+    assert len(sale["payments"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_idempotent_sale(client, auth_headers):
     product = await _create_product(client, auth_headers, "IDEM-SALE-001", stock=20)
     payload = {
