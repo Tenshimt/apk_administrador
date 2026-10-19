@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: ceramica_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ceramica:ceramica@db:5432/ceramica_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-production}
+      - ENVIRONMENT=development
+      - LOG_LEVEL=info
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: ceramica_db
+    environment:
+      POSTGRES_USER: ceramica
+      POSTGRES_PASSWORD: ceramica
+      POSTGRES_DB: ceramica_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ceramica -d ceramica_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ceramica_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build: .
+    container_name: ceramica_worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://ceramica:ceramica@db:5432/ceramica_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-production}
+      - ENVIRONMENT=development
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A background_tasks.celery_app worker --loglevel=info
+    restart: unless-stopped
+
+  # Uncomment for local Supabase-compatible studio
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@ceramica.local
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   depends_on:
+  #     - db
+
+volumes:
+  postgres_data:
+  redis_data:
