@@ -55,7 +55,7 @@ class ConnectionManager:
 
     async def broadcast(self, store_id: str, event_type: str, payload: dict[str, Any]) -> None:
         """Publish to Redis so all API instances can forward to their WebSocket clients."""
-        message = json.dumps({"store_id": store_id, "type": event_type, "payload": payload})
+        message = json.dumps({"store_id": store_id, "type": event_type, "payload": payload}, default=str)
         if self._redis:
             try:
                 await self._redis.publish("ceramica:events", message)
@@ -68,7 +68,7 @@ class ConnectionManager:
     async def _local_broadcast(
         self, store_id: str, event_type: str, payload: dict[str, Any]
     ) -> None:
-        message = json.dumps({"type": event_type, "payload": payload})
+        message = json.dumps({"type": event_type, "payload": payload}, default=str)
         dead: set[WebSocket] = set()
         for ws in self._connections.get(store_id, set()):
             try:

@@ -1,6 +1,8 @@
+import enum
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -8,6 +10,12 @@ from models.base_mixin import FullMixin
 
 if TYPE_CHECKING:
     from models.store import Store
+
+
+class ProductUnit(str, enum.Enum):
+    m2 = "m2"
+    box = "box"
+    unit = "unit"
 
 
 class Product(FullMixin, Base):
@@ -22,8 +30,13 @@ class Product(FullMixin, Base):
     cost_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     wholesale_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    stock_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    low_stock_threshold: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    unit: Mapped[ProductUnit] = mapped_column(
+        Enum(ProductUnit, name="product_unit"), default=ProductUnit.unit, nullable=False
+    )
+    m2_per_box: Mapped[Decimal | None] = mapped_column(Numeric(8, 3), nullable=True)
+
+    stock_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=0, nullable=False)
+    low_stock_threshold: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=5, nullable=False)
 
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 

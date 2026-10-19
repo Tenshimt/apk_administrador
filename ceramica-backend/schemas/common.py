@@ -1,6 +1,19 @@
-from typing import Any, Generic, TypeVar
+from decimal import Decimal
+from typing import Annotated, Any, Generic, TypeVar
 
 from pydantic import BaseModel
+from pydantic.functional_serializers import PlainSerializer
+
+# Decimal field that serializes as a float in JSON output (instead of string)
+DecimalOut = Annotated[
+    Decimal | None,
+    PlainSerializer(lambda x: float(x) if x is not None else None, return_type=float | None),
+]
+# Non-nullable version
+DecimalOutRequired = Annotated[
+    Decimal,
+    PlainSerializer(lambda x: float(x), return_type=float),
+]
 
 T = TypeVar("T")
 

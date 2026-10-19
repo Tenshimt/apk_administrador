@@ -1,10 +1,13 @@
+from decimal import Decimal
 from models.sale import PaymentMethod, SaleStatus
 from pydantic import BaseModel, Field
+from schemas.common import DecimalOut, DecimalOutRequired
 
 
 class SaleItemCreate(BaseModel):
     product_id: str
-    quantity: int = Field(..., gt=0)
+    quantity: Decimal = Field(..., gt=0)
+    requested_m2: Decimal | None = Field(None, gt=0)
     unit_price_cents: int | None = Field(default=None, gt=0)
     discount_cents: int = Field(0, ge=0)
 
@@ -12,7 +15,8 @@ class SaleItemCreate(BaseModel):
 class SaleItemOut(BaseModel):
     id: str
     product_id: str
-    quantity: int
+    quantity: DecimalOutRequired
+    requested_m2: DecimalOut = None
     unit_price_cents: int
     unit_cost_cents: int | None = None
     discount_cents: int

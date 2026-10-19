@@ -1,7 +1,8 @@
 import enum
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String
+from sqlalchemy import Enum, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -25,7 +26,7 @@ class StockMovement(UUIDMixin, TimestampMixin, Base):
     product_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    quantity_change: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity_change: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     reason: Mapped[MovementReason] = mapped_column(
         Enum(MovementReason, name="movement_reason"), nullable=False
     )

@@ -1,7 +1,8 @@
 import enum
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -88,8 +89,8 @@ class PurchaseOrderItem(UUIDMixin, TimestampMixin, Base):
     )
     store_id: Mapped[str] = mapped_column(String(36), nullable=False)
 
-    quantity_ordered: Mapped[int] = mapped_column(Integer, nullable=False)
-    quantity_received: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    quantity_ordered: Mapped["Decimal"] = mapped_column(Numeric(12, 3), nullable=False)
+    quantity_received: Mapped["Decimal"] = mapped_column(Numeric(12, 3), default=0, nullable=False)
     unit_cost_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     total_cents: Mapped[int] = mapped_column(Integer, nullable=False)
 

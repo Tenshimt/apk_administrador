@@ -1,4 +1,7 @@
-from pydantic import BaseModel, Field, field_validator
+from decimal import Decimal
+from pydantic import BaseModel, Field
+from models.product import ProductUnit
+from schemas.common import DecimalOut, DecimalOutRequired
 
 
 class ProductBase(BaseModel):
@@ -9,8 +12,10 @@ class ProductBase(BaseModel):
     price_cents: int = Field(..., gt=0)
     cost_cents: int = Field(0, ge=0)
     wholesale_price_cents: int | None = Field(None, gt=0)
-    stock_quantity: int = Field(0, ge=0)
-    low_stock_threshold: int = Field(5, ge=0)
+    unit: ProductUnit = ProductUnit.unit
+    m2_per_box: Decimal | None = Field(None, gt=0)
+    stock_quantity: Decimal = Field(Decimal("0"), ge=0)
+    low_stock_threshold: Decimal = Field(Decimal("5"), ge=0)
 
 
 class ProductCreate(ProductBase):
@@ -24,18 +29,31 @@ class ProductUpdate(BaseModel):
     price_cents: int | None = Field(None, gt=0)
     cost_cents: int | None = Field(None, ge=0)
     wholesale_price_cents: int | None = Field(None, gt=0)
-    low_stock_threshold: int | None = Field(None, ge=0)
+    unit: ProductUnit | None = None
+    m2_per_box: Decimal | None = Field(None, gt=0)
+    low_stock_threshold: Decimal | None = Field(None, ge=0)
 
 
 class StockAdjustRequest(BaseModel):
-    quantity_delta: int
+    quantity_delta: Decimal
     reason: str = Field(..., min_length=1, max_length=500)
     client_generated_id: str | None = None
 
 
-class ProductOut(ProductBase):
+class ProductOut(BaseModel):
     id: str
     store_id: str
+    sku: str
+    name: str
+    description: str | None = None
+    category: str | None = None
+    price_cents: int
+    cost_cents: int
+    wholesale_price_cents: int | None = None
+    unit: ProductUnit = ProductUnit.unit
+    m2_per_box: DecimalOut = None
+    stock_quantity: DecimalOutRequired
+    low_stock_threshold: DecimalOutRequired
     is_active: bool
     version: int
     client_generated_id: str | None = None
@@ -47,7 +65,7 @@ class StockMovementOut(BaseModel):
     id: str
     product_id: str
     store_id: str
-    quantity_change: int
+    quantity_change: DecimalOutRequired
     reason: str
     reference_id: str | None
     user_id: str | None

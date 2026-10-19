@@ -1,5 +1,6 @@
 import json
-import uuid
+import math
+from decimal import Decimal
 from typing import Callable, Awaitable, Any
 
 from fastapi import HTTPException
@@ -10,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from config import get_settings
 from models.audit import AuditLog
 from models.client import Client, ClientType
-from models.product import Product
+from models.product import Product, ProductUnit
 from models.sale import Payment, Sale, SaleItem, SaleStatus
 from models.stock_movement import MovementReason, StockMovement
 from models.user import User, UserRole
@@ -109,12 +110,17 @@ class SaleService:
                 raise HTTPException(
                     status_code=404, detail=f"Product {item_data.product_id} not found"
                 )
-            if product.stock_quantity < item_data.quantity:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Insufficient stock for '{product.name}': "
-                    f"available={product.stock_quantity}, requested={item_data.quantity}",
-                )
+
+            # m² → boxes conversion
+            quantity = item_data.quantity
+            requested_m2 = item_data.requested_m2
+            if (
+                requested_m2 is not None
+                and product.unit == ProductUnit.box
+                and product.m2_per_box
+            ):
+                boxes = Decimal(str(math.ceil(requested_m2 / product.m2_per_box)))
+                quantity = boxes
 
             # Determine effective price
             if is_distributor and product.wholesale_price_cents and not item_data.unit_price_cents:
@@ -125,7 +131,7 @@ class SaleService:
             else:
                 unit_price = product.price_cents
 
-            item_gross = unit_price * item_data.quantity
+            item_gross = int(round(Decimal(str(unit_price)) * quantity))
             if item_data.discount_cents > item_gross:
                 raise HTTPException(
                     status_code=400,
@@ -133,12 +139,19 @@ class SaleService:
                 )
             item_total = item_gross - item_data.discount_cents
 
+            if product.stock_quantity < quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient stock for '{product.name}': "
+                    f"available={product.stock_quantity}, requested={quantity}",
+                )
+
             # Optimistic locking on stock decrement
             res = await self.db.execute(
                 update(Product)
                 .where(Product.id == product.id, Product.version == product.version)
                 .values(
-                    stock_quantity=Product.stock_quantity - item_data.quantity,
+                    stock_quantity=Product.stock_quantity - quantity,
                     version=Product.version + 1,
                 )
                 .returning(Product.stock_quantity)
@@ -155,7 +168,8 @@ class SaleService:
                 SaleItem(
                     product_id=product.id,
                     store_id=self.store_id,
-                    quantity=item_data.quantity,
+                    quantity=quantity,
+                    requested_m2=requested_m2,
                     unit_price_cents=unit_price,
                     unit_cost_cents=product.cost_cents,
                     discount_cents=item_data.discount_cents,

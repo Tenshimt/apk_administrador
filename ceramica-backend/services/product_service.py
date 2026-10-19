@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, update
@@ -155,7 +156,7 @@ class ProductService:
             action=action,
             entity_type="product",
             entity_id=entity_id,
-            old_values=json.dumps(old_values) if old_values else None,
-            new_values=json.dumps(new_values) if new_values else None,
+            old_values=json.dumps(old_values, default=str) if old_values else None,
+            new_values=json.dumps(new_values, default=str) if new_values else None,
         )
         self.db.add(log)
