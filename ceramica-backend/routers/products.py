@@ -86,6 +86,7 @@ async def adjust_stock(
     product_id: str,
     data: StockAdjustRequest,
     background_tasks: BackgroundTasks,
+    _: User = _privileged,
     svc: ProductService = Depends(_svc),
 ):
     pending: list[tuple] = []

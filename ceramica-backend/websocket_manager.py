@@ -38,9 +38,15 @@ class ConnectionManager:
         if self._listener_task:
             self._listener_task.cancel()
         if self._pubsub:
-            await self._pubsub.unsubscribe()
+            try:
+                await self._pubsub.unsubscribe()
+            except Exception as exc:
+                logger.warning("Redis unsubscribe failed during shutdown: %s", exc)
         if self._redis:
-            await self._redis.aclose()
+            try:
+                await self._redis.aclose()
+            except Exception as exc:
+                logger.warning("Redis close failed during shutdown: %s", exc)
 
     async def connect(self, websocket: WebSocket, store_id: str) -> None:
         await websocket.accept()

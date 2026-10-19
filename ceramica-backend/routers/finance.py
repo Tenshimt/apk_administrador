@@ -34,7 +34,7 @@ async def dashboard(
 
 
 @router.post("/expense", response_model=StandardResponse[ExpenseOut], status_code=201)
-async def create_expense(data: ExpenseCreate, svc: FinanceService = Depends(_svc)):
+async def create_expense(data: ExpenseCreate, _: User = _privileged, svc: FinanceService = Depends(_svc)):
     expense = await svc.create_expense(data)
     return StandardResponse(data=ExpenseOut.model_validate(expense))
 
