@@ -30,7 +30,7 @@ async def _product(client, headers, sku, price=5000, cost=2000, wholesale=None, 
     return resp.json()["data"]
 
 
-async def _client(client, headers, name, client_type="retail", credit_limit=0):
+async def _client(client, headers, name, client_type="retail", credit_limit=None):
     resp = await client.post("/clients", json={
         "full_name": name, "client_type": client_type,
         "credit_limit_cents": credit_limit,
@@ -154,10 +154,10 @@ async def test_credit_limit_enforced(client, auth_headers):
 
 
 @pytest.mark.asyncio
-async def test_credit_limit_zero_means_unlimited(client, auth_headers):
-    """credit_limit_cents=0 means no limit enforced."""
+async def test_credit_limit_null_means_unlimited(client, auth_headers):
+    """credit_limit_cents=None means unlimited credit."""
     p = await _product(client, auth_headers, "CL-FREE-P1", price=50000, cost=2000, stock=10)
-    cli = await _client(client, auth_headers, "Unlimited Client", credit_limit=0)
+    cli = await _client(client, auth_headers, "Unlimited Client", credit_limit=None)
 
     resp = await client.post("/sales", json={
         "items": [{"product_id": p["id"], "quantity": 1, "discount_cents": 0}],

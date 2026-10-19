@@ -80,7 +80,7 @@ class SupplierService:
                 raise HTTPException(
                     status_code=404, detail=f"Product {item_data.product_id} not found"
                 )
-            item_total = item_data.quantity_ordered * item_data.unit_cost_cents
+            item_total = int(round(item_data.quantity_ordered * item_data.unit_cost_cents))
             total += item_total
             self.db.add(
                 PurchaseOrderItem(
@@ -92,7 +92,7 @@ class SupplierService:
                     total_cents=item_total,
                 )
             )
-        order.total_cents = total
+        order.total_cents = int(total)
         await self.db.flush()
         result = await self.db.execute(
             select(PurchaseOrder)

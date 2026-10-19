@@ -45,8 +45,8 @@ async def test_product_fractional_stock(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_sale_fractional_quantity(client, auth_headers):
-    """SaleItem.quantity can be a Decimal (e.g. 2.5)."""
-    product = await _create_product(client, auth_headers, "FRAC-SALE-001", stock="20")
+    """SaleItem.quantity can be a Decimal (e.g. 2.5) for m2 products."""
+    product = await _create_product(client, auth_headers, "FRAC-SALE-001", stock="20", unit="m2")
     resp = await client.post("/sales", json={
         "items": [{
             "product_id": product["id"],
@@ -67,7 +67,7 @@ async def test_sale_fractional_quantity(client, auth_headers):
 @pytest.mark.asyncio
 async def test_stock_decremented_fractionally(client, auth_headers):
     """Stock decrements by the fractional quantity sold."""
-    product = await _create_product(client, auth_headers, "FRAC-STOCK-001", stock="10.0")
+    product = await _create_product(client, auth_headers, "FRAC-STOCK-001", stock="10.0", unit="m2")
     await client.post("/sales", json={
         "items": [{"product_id": product["id"], "quantity": "3.5", "discount_cents": 0}],
         "discount_cents": 0,

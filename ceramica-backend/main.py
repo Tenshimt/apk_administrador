@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -45,7 +46,7 @@ async def lifespan(app: FastAPI):
         import asyncio
 
         def _run_alembic():
-            cfg = AlembicConfig("alembic.ini")
+            cfg = AlembicConfig(os.path.join(os.path.dirname(__file__), "alembic.ini"))
             command.upgrade(cfg, "head")
 
         await asyncio.get_event_loop().run_in_executor(None, _run_alembic)

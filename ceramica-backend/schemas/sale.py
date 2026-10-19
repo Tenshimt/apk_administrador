@@ -33,11 +33,7 @@ class SaleCreate(BaseModel):
     client_generated_id: str | None = None
     # Optional immediate payment
     payment_method: PaymentMethod | None = None
-    payment_amount_cents: int | None = None
-
-
-class SaleStatusUpdate(BaseModel):
-    status: SaleStatus
+    payment_amount_cents: int | None = Field(default=None, gt=0)
 
 
 class PaymentCreate(BaseModel):

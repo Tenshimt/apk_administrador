@@ -2,15 +2,17 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from dependencies.auth import get_current_user
+from dependencies.auth import get_current_user, require_roles
 from dependencies.store import get_store_id
-from models.user import User
+from models.user import User, UserRole
 from schemas.common import PaginatedResponse, PaginationMeta, StandardResponse
-from schemas.sale import PaymentCreate, SaleCreate, SaleOut, SaleStatusUpdate
+from schemas.sale import PaymentCreate, SaleCreate, SaleOut
 from services.sale_service import SaleService
 from websocket_manager import manager
 
 router = APIRouter(prefix="/sales", tags=["sales"])
+
+_write_access = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.cashier))
 
 
 def _svc(
@@ -48,7 +50,7 @@ async def list_sales(
     )
 
 
-@router.post("", response_model=StandardResponse[SaleOut], status_code=201)
+@router.post("", response_model=StandardResponse[SaleOut], status_code=201, dependencies=[_write_access])
 async def create_sale(
     data: SaleCreate,
     background_tasks: BackgroundTasks,
@@ -78,15 +80,7 @@ async def cancel_sale(
     return StandardResponse(data=SaleOut.model_validate(sale))
 
 
-@router.patch("/{sale_id}/status", response_model=StandardResponse[SaleOut])
-async def update_status(
-    sale_id: str, data: SaleStatusUpdate, svc: SaleService = Depends(_svc)
-):
-    sale = await svc.update_status(sale_id, data)
-    return StandardResponse(data=SaleOut.model_validate(sale))
-
-
-@router.post("/{sale_id}/payment", response_model=StandardResponse[SaleOut])
+@router.post("/{sale_id}/payment", response_model=StandardResponse[SaleOut], dependencies=[_write_access])
 async def add_payment(
     sale_id: str,
     data: PaymentCreate,

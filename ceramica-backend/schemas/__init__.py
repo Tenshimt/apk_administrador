@@ -9,7 +9,6 @@ from schemas.sale import (
     SaleCreate,
     SaleItemCreate,
     SaleOut,
-    SaleStatusUpdate,
 )
 from schemas.supplier import (
     PurchaseOrderCreate,
@@ -27,6 +26,6 @@ __all__ = [
     "PaymentCreate", "PaymentOut",
     "ProductCreate", "ProductOut", "ProductUpdate", "StockAdjustRequest",
     "PurchaseOrderCreate", "PurchaseOrderOut", "PurchaseOrderReceive",
-    "SaleCreate", "SaleItemCreate", "SaleOut", "SaleStatusUpdate",
+    "SaleCreate", "SaleItemCreate", "SaleOut",
     "SupplierCreate", "SupplierOut",
 ]

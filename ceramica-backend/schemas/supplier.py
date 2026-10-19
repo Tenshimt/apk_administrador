@@ -1,3 +1,4 @@
+from decimal import Decimal
 from models.supplier import PurchaseOrderStatus
 from pydantic import BaseModel, EmailStr, Field
 
@@ -25,15 +26,15 @@ class SupplierOut(SupplierBase):
 
 class PurchaseOrderItemCreate(BaseModel):
     product_id: str
-    quantity_ordered: int = Field(..., gt=0)
+    quantity_ordered: Decimal = Field(..., gt=0)
     unit_cost_cents: int = Field(..., gt=0)
 
 
 class PurchaseOrderItemOut(BaseModel):
     id: str
     product_id: str
-    quantity_ordered: int
-    quantity_received: int
+    quantity_ordered: Decimal
+    quantity_received: Decimal
     unit_cost_cents: int
     total_cents: int
 

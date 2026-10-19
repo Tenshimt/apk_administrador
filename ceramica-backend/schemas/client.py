@@ -10,7 +10,7 @@ class ClientBase(BaseModel):
     address: str | None = None
     notes: str | None = None
     client_type: ClientType = ClientType.retail
-    credit_limit_cents: int = Field(0, ge=0)
+    credit_limit_cents: int | None = Field(default=0, ge=0)
 
 
 class ClientCreate(ClientBase):
@@ -24,7 +24,7 @@ class ClientUpdate(BaseModel):
     address: str | None = None
     notes: str | None = None
     client_type: ClientType | None = None
-    credit_limit_cents: int | None = Field(None, ge=0)
+    credit_limit_cents: int | None = Field(default=None, ge=0)
 
 
 class ClientOut(ClientBase):

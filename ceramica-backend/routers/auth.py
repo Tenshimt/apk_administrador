@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from dependencies.auth import get_current_user
-from dependencies.rate_limit import auth_rate_limit
+from dependencies.rate_limit import (
+    check_rate_limit,
+    login_rate_key,
+    record_failure,
+    register_rate_key,
+    reset_key,
+)
 from models.user import User
 from schemas.auth import LoginRequest, LoginResponse, RefreshRequest, RegisterStoreRequest
 from schemas.common import StandardResponse
@@ -12,27 +18,36 @@ from services.auth_service import AuthService
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post(
-    "/register-store",
-    response_model=StandardResponse[dict],
-    status_code=201,
-    dependencies=[Depends(auth_rate_limit)],
-)
-async def register_store(data: RegisterStoreRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/register-store", response_model=StandardResponse[dict], status_code=201)
+async def register_store(
+    request: Request, data: RegisterStoreRequest, db: AsyncSession = Depends(get_db)
+):
+    key = register_rate_key(request)
+    check_rate_limit(key)
     svc = AuthService(db)
-    result = await svc.register_store(data)
-    return StandardResponse(data=result)
+    try:
+        result = await svc.register_store(data)
+        reset_key(key)
+        return StandardResponse(data=result)
+    except HTTPException:
+        record_failure(key)
+        raise
 
 
-@router.post(
-    "/login",
-    response_model=StandardResponse[LoginResponse],
-    dependencies=[Depends(auth_rate_limit)],
-)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/login", response_model=StandardResponse[LoginResponse])
+async def login(
+    request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)
+):
+    key = login_rate_key(request, data.email, data.store_slug)
+    check_rate_limit(key)
     svc = AuthService(db)
-    tokens = await svc.login(data)
-    return StandardResponse(data=tokens)
+    try:
+        tokens = await svc.login(data)
+        reset_key(key)
+        return StandardResponse(data=tokens)
+    except HTTPException:
+        record_failure(key)
+        raise
 
 
 @router.post("/refresh", response_model=StandardResponse[LoginResponse])

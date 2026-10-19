@@ -13,6 +13,7 @@ from services.client_service import ClientService
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 _privileged = Depends(require_roles(UserRole.owner, UserRole.admin))
+_write_access = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.cashier))
 
 
 def _svc(
@@ -37,7 +38,7 @@ async def list_clients(
     )
 
 
-@router.post("", response_model=StandardResponse[ClientOut], status_code=201)
+@router.post("", response_model=StandardResponse[ClientOut], status_code=201, dependencies=[_write_access])
 async def create_client(data: ClientCreate, svc: ClientService = Depends(_svc)):
     client = await svc.create(data)
     return StandardResponse(data=ClientOut.model_validate(client))
@@ -55,7 +56,7 @@ async def get_client(client_id: str, svc: ClientService = Depends(_svc)):
     return StandardResponse(data=ClientOut.model_validate(client))
 
 
-@router.put("/{client_id}", response_model=StandardResponse[ClientOut])
+@router.put("/{client_id}", response_model=StandardResponse[ClientOut], dependencies=[_write_access])
 async def update_client(
     client_id: str, data: ClientUpdate, svc: ClientService = Depends(_svc)
 ):
@@ -69,7 +70,7 @@ async def get_client_debt(client_id: str, svc: ClientService = Depends(_svc)):
     return StandardResponse(data=ClientDebtOut(**debt_info))
 
 
-@router.post("/{client_id}/payment", response_model=StandardResponse[dict])
+@router.post("/{client_id}/payment", response_model=StandardResponse[dict], dependencies=[_write_access])
 async def client_payment(
     client_id: str,
     data: PaymentCreate,

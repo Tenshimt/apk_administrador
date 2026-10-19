@@ -11,7 +11,7 @@ async def _create_product(client, auth_headers, sku="SALE-P1", stock=50, price=5
 
 
 async def _create_client(client, auth_headers, name="Test Client"):
-    resp = await client.post("/clients", json={"full_name": name}, headers=auth_headers)
+    resp = await client.post("/clients", json={"full_name": name, "credit_limit_cents": None}, headers=auth_headers)
     assert resp.status_code == 201
     return resp.json()["data"]
 

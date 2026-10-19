@@ -31,7 +31,7 @@ class Client(FullMixin, Base):
     client_type: Mapped[ClientType] = mapped_column(
         Enum(ClientType, name="client_type"), default=ClientType.retail, nullable=False
     )
-    credit_limit_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    credit_limit_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     client_generated_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True, index=True

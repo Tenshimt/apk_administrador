@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Rate limiting (auth endpoints)
     auth_rate_limit_requests: int = 5
     auth_rate_limit_window_seconds: int = 60
+    trusted_proxy: bool = False
 
     # Logging
     log_level: str = "info"

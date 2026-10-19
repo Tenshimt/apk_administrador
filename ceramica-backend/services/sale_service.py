@@ -15,7 +15,7 @@ from models.product import Product, ProductUnit
 from models.sale import Payment, Sale, SaleItem, SaleStatus
 from models.stock_movement import MovementReason, StockMovement
 from models.user import User, UserRole
-from schemas.sale import PaymentCreate, SaleCreate, SaleStatusUpdate
+from schemas.sale import PaymentCreate, SaleCreate
 
 settings = get_settings()
 
@@ -121,6 +121,13 @@ class SaleService:
             ):
                 boxes = Decimal(str(math.ceil(requested_m2 / product.m2_per_box)))
                 quantity = boxes
+
+            # Reject fractional quantities for non-m2 products
+            if product.unit != ProductUnit.m2 and quantity != quantity.to_integral_value():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Product '{product.name}' requires integer quantity (unit: {product.unit.value})",
+                )
 
             # Determine effective price
             if is_distributor and product.wholesale_price_cents and not item_data.unit_price_cents:
@@ -239,8 +246,8 @@ class SaleService:
                     status_code=400,
                     detail="client_id is required when sale has an unpaid balance",
                 )
-            # Check credit limit
-            if client.credit_limit_cents > 0 and client.debt_cents + remaining > client.credit_limit_cents:
+            # Check credit limit (None = unlimited, 0 = no credit)
+            if client.credit_limit_cents is not None and client.debt_cents + remaining > client.credit_limit_cents:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Credit limit exceeded. Limit: {client.credit_limit_cents}, "
@@ -338,17 +345,6 @@ class SaleService:
             .options(selectinload(Sale.items), selectinload(Sale.payments))
         )
         return result.scalar_one()
-
-    async def update_status(self, sale_id: str, data: SaleStatusUpdate) -> Sale:
-        if data.status == SaleStatus.cancelled:
-            raise HTTPException(
-                status_code=400,
-                detail="Use POST /sales/{id}/cancel to cancel a sale",
-            )
-        sale = await self.get_or_404(sale_id)
-        sale.status = data.status
-        await self.db.flush()
-        return sale
 
     async def add_payment(
         self, sale_id: str, data: PaymentCreate, broadcast: BroadcastFn | None = None

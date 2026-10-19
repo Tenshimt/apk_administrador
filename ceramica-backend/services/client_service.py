@@ -117,12 +117,6 @@ class ClientService:
     async def apply_fifo_payment(self, client_id: str, data) -> list[dict]:
         client = await self.get_or_404(client_id)
 
-        if data.amount_cents > client.debt_cents:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Payment ({data.amount_cents}) exceeds total client debt ({client.debt_cents})",
-            )
-
         unpaid = (
             await self.db.execute(
                 select(Sale)
@@ -136,8 +130,16 @@ class ClientService:
             )
         ).scalars().all()
 
+        total_balance = sum(s.balance_cents for s in unpaid)
+        if data.amount_cents > total_balance:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment ({data.amount_cents}) exceeds sum of unpaid sale balances ({total_balance})",
+            )
+
         remaining = data.amount_cents
         applied = []
+        total_applied = 0
 
         for sale in unpaid:
             if remaining <= 0:
@@ -156,9 +158,10 @@ class ClientService:
             else:
                 sale.status = SaleStatus.partial
             remaining -= apply
+            total_applied += apply
             applied.append({"sale_id": sale.id, "amount_cents": apply})
 
-        client.debt_cents = max(0, client.debt_cents - data.amount_cents)
+        client.debt_cents = max(0, client.debt_cents - total_applied)
         await self.db.flush()
         return applied
 
