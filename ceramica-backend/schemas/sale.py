@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class SaleItemCreate(BaseModel):
     product_id: str
     quantity: int = Field(..., gt=0)
-    unit_price_cents: int = Field(..., gt=0)
+    unit_price_cents: int | None = Field(default=None, gt=0)
     discount_cents: int = Field(0, ge=0)
 
 

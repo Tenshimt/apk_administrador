@@ -12,12 +12,14 @@ from models.audit import AuditLog
 from models.client import Client
 from models.product import Product
 from models.sale import Payment, Sale, SaleItem, SaleStatus
-from models.user import User
+from models.user import User, UserRole
 from schemas.sale import PaymentCreate, SaleCreate, SaleStatusUpdate
 
 settings = get_settings()
 
 BroadcastFn = Callable[[str, str, dict[str, Any]], Awaitable[None]]
+
+_PRIVILEGED = {UserRole.owner, UserRole.admin}
 
 
 class SaleService:
@@ -25,6 +27,10 @@ class SaleService:
         self.db = db
         self.store_id = store_id
         self.user = current_user
+
+    def _require_privileged(self) -> None:
+        if not self.user or self.user.role not in _PRIVILEGED:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     async def list_sales(self, limit: int = 20, offset: int = 0) -> tuple[list[Sale], int]:
         from sqlalchemy import func
@@ -72,7 +78,6 @@ class SaleService:
             if existing:
                 return existing
 
-        # Validate client debt limit if credit sale
         client = None
         if data.client_id:
             result = await self.db.execute(
@@ -84,7 +89,6 @@ class SaleService:
             if not client:
                 raise HTTPException(status_code=404, detail="Client not found")
 
-        # Build sale items and decrement stock
         sale_items = []
         subtotal = 0
 
@@ -108,6 +112,21 @@ class SaleService:
                     f"available={product.stock_quantity}, requested={item_data.quantity}",
                 )
 
+            # Price comes from product; override allowed only for owner/admin
+            if item_data.unit_price_cents is not None and item_data.unit_price_cents != product.price_cents:
+                self._require_privileged()
+                unit_price = item_data.unit_price_cents
+            else:
+                unit_price = product.price_cents
+
+            item_gross = unit_price * item_data.quantity
+            if item_data.discount_cents > item_gross:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item discount ({item_data.discount_cents}) exceeds item gross ({item_gross})",
+                )
+            item_total = item_gross - item_data.discount_cents
+
             # Optimistic locking on stock decrement
             res = await self.db.execute(
                 update(Product)
@@ -125,20 +144,18 @@ class SaleService:
                     detail=f"Concurrent update on product '{product.name}' — please retry",
                 )
 
-            item_total = item_data.unit_price_cents * item_data.quantity - item_data.discount_cents
             subtotal += item_total
             sale_items.append(
                 SaleItem(
                     product_id=product.id,
                     store_id=self.store_id,
                     quantity=item_data.quantity,
-                    unit_price_cents=item_data.unit_price_cents,
+                    unit_price_cents=unit_price,
                     discount_cents=item_data.discount_cents,
                     total_cents=item_total,
                 )
             )
 
-            # Broadcast low stock if threshold breached
             if broadcast and new_stock <= product.low_stock_threshold:
                 await broadcast(
                     self.store_id,
@@ -146,7 +163,14 @@ class SaleService:
                     {"product_id": product.id, "sku": product.sku, "stock": new_stock},
                 )
 
+        if data.discount_cents > subtotal:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Sale discount ({data.discount_cents}) exceeds subtotal ({subtotal})",
+            )
         total = subtotal - data.discount_cents
+        if total < 0:
+            raise HTTPException(status_code=400, detail="Sale total cannot be negative")
 
         sale = Sale(
             store_id=self.store_id,
@@ -171,17 +195,21 @@ class SaleService:
         if data.payment_method and data.payment_amount_cents:
             await self._apply_payment(
                 sale,
-                client,
                 PaymentCreate(
                     amount_cents=data.payment_amount_cents,
                     method=data.payment_method,
                 ),
             )
-        else:
-            # Credit sale — add to client debt
-            if client and total > 0:
-                client.debt_cents += total
-                sale.status = SaleStatus.partial if sale.paid_cents > 0 else SaleStatus.pending
+
+        # Remaining balance goes to client debt; require client_id if balance > 0
+        remaining = total - sale.paid_cents
+        if remaining > 0:
+            if not client:
+                raise HTTPException(
+                    status_code=400,
+                    detail="client_id is required when sale has an unpaid balance",
+                )
+            client.debt_cents += remaining
 
         await self.db.flush()
 
@@ -203,7 +231,62 @@ class SaleService:
                 {"sale_id": sale.id, "total_cents": total, "status": sale.status.value},
             )
 
-        # Reload with eager-loaded relationships to avoid MissingGreenlet on serialization
+        result = await self.db.execute(
+            select(Sale)
+            .where(Sale.id == sale.id)
+            .options(selectinload(Sale.items), selectinload(Sale.payments))
+        )
+        return result.scalar_one()
+
+    async def cancel(self, sale_id: str, broadcast: BroadcastFn | None = None) -> Sale:
+        self._require_privileged()
+        sale = await self.get_or_404(sale_id)
+
+        if sale.status == SaleStatus.cancelled:
+            raise HTTPException(status_code=400, detail="Sale is already cancelled")
+        if sale.paid_cents > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot cancel a sale with payments. Record a refund first.",
+            )
+
+        # Restore stock for each item
+        for item in sale.items:
+            await self.db.execute(
+                update(Product)
+                .where(Product.id == item.product_id)
+                .values(stock_quantity=Product.stock_quantity + item.quantity)
+            )
+
+        # Reverse client debt (only the unpaid balance)
+        if sale.client_id and sale.balance_cents > 0:
+            result = await self.db.execute(
+                select(Client).where(Client.id == sale.client_id)
+            )
+            cl = result.scalar_one_or_none()
+            if cl:
+                cl.debt_cents = max(0, cl.debt_cents - sale.balance_cents)
+
+        sale.status = SaleStatus.cancelled
+        self.db.add(
+            AuditLog(
+                store_id=self.store_id,
+                user_id=self.user.id if self.user else None,
+                action="cancel",
+                entity_type="sale",
+                entity_id=sale.id,
+                new_values=json.dumps({"cancelled_total": sale.total_cents}),
+            )
+        )
+        await self.db.flush()
+
+        if broadcast:
+            await broadcast(
+                self.store_id,
+                "sale_cancelled",
+                {"sale_id": sale.id, "total_cents": sale.total_cents},
+            )
+
         result = await self.db.execute(
             select(Sale)
             .where(Sale.id == sale.id)
@@ -220,7 +303,6 @@ class SaleService:
     async def add_payment(
         self, sale_id: str, data: PaymentCreate, broadcast: BroadcastFn | None = None
     ) -> Sale:
-        # Idempotency
         if data.client_generated_id:
             result = await self.db.execute(
                 select(Payment).where(
@@ -237,7 +319,12 @@ class SaleService:
             result = await self.db.execute(select(Client).where(Client.id == sale.client_id))
             client = result.scalar_one_or_none()
 
-        await self._apply_payment(sale, client, data)
+        await self._apply_payment(sale, data)
+
+        # Reduce client debt by amount paid
+        if client:
+            client.debt_cents = max(0, client.debt_cents - data.amount_cents)
+
         await self.db.flush()
 
         if broadcast:
@@ -251,7 +338,6 @@ class SaleService:
                 },
             )
 
-        # Reload with eager-loaded relationships to avoid MissingGreenlet on serialization
         result = await self.db.execute(
             select(Sale)
             .where(Sale.id == sale.id)
@@ -259,9 +345,7 @@ class SaleService:
         )
         return result.scalar_one()
 
-    async def _apply_payment(
-        self, sale: Sale, client: Client | None, data: PaymentCreate
-    ) -> None:
+    async def _apply_payment(self, sale: Sale, data: PaymentCreate) -> None:
         if data.amount_cents > sale.balance_cents:
             raise HTTPException(
                 status_code=400,
@@ -279,9 +363,6 @@ class SaleService:
         )
         self.db.add(payment)
         sale.paid_cents += data.amount_cents
-
-        if client:
-            client.debt_cents = max(0, client.debt_cents - data.amount_cents)
 
         if sale.paid_cents >= sale.total_cents:
             sale.status = SaleStatus.completed

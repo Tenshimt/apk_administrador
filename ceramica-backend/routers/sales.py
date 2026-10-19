@@ -66,6 +66,18 @@ async def get_sale(sale_id: str, svc: SaleService = Depends(_svc)):
     return StandardResponse(data=SaleOut.model_validate(sale))
 
 
+@router.post("/{sale_id}/cancel", response_model=StandardResponse[SaleOut])
+async def cancel_sale(
+    sale_id: str,
+    background_tasks: BackgroundTasks,
+    svc: SaleService = Depends(_svc),
+):
+    collect, schedule = _deferred_broadcast(background_tasks)
+    sale = await svc.cancel(sale_id, broadcast=collect)
+    schedule()
+    return StandardResponse(data=SaleOut.model_validate(sale))
+
+
 @router.patch("/{sale_id}/status", response_model=StandardResponse[SaleOut])
 async def update_status(
     sale_id: str, data: SaleStatusUpdate, svc: SaleService = Depends(_svc)

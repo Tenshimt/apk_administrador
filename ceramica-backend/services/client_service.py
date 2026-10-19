@@ -5,9 +5,10 @@ from sqlalchemy.orm import selectinload
 
 from config import get_settings
 from models.client import Client
-from models.sale import Sale, SaleStatus
+from models.sale import Payment, Sale, SaleStatus
 from models.user import User
 from schemas.client import ClientCreate, ClientUpdate
+from schemas.sale import PaymentCreate
 
 settings = get_settings()
 
@@ -97,6 +98,56 @@ class ClientService:
                 for s in pending_sales
             ],
         }
+
+    async def apply_fifo_payment(self, client_id: str, data: PaymentCreate) -> list[dict]:
+        """Distribute a payment FIFO across all unpaid sales."""
+        client = await self.get_or_404(client_id)
+        result = await self.db.execute(
+            select(Sale)
+            .where(
+                Sale.client_id == client_id,
+                Sale.store_id == self.store_id,
+                Sale.status.in_([SaleStatus.pending, SaleStatus.partial]),
+            )
+            .order_by(Sale.created_at.asc())
+        )
+        pending_sales = result.scalars().all()
+
+        total_debt = sum(s.balance_cents for s in pending_sales)
+        if data.amount_cents > total_debt:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Payment ({data.amount_cents}) exceeds total client debt ({total_debt})",
+            )
+
+        remaining = data.amount_cents
+        applied = []
+
+        for sale in pending_sales:
+            if remaining <= 0:
+                break
+            apply_amount = min(remaining, sale.balance_cents)
+            payment = Payment(
+                sale_id=sale.id,
+                store_id=self.store_id,
+                amount_cents=apply_amount,
+                method=data.method,
+                reference=data.reference,
+            )
+            self.db.add(payment)
+            sale.paid_cents += apply_amount
+            client.debt_cents = max(0, client.debt_cents - apply_amount)
+            remaining -= apply_amount
+
+            if sale.paid_cents >= sale.total_cents:
+                sale.status = SaleStatus.completed
+            elif sale.paid_cents > 0:
+                sale.status = SaleStatus.partial
+
+            applied.append({"sale_id": sale.id, "amount_cents": apply_amount})
+
+        await self.db.flush()
+        return applied
 
     async def get_history(
         self, client_id: str, limit: int = 20, offset: int = 0
